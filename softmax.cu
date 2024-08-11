@@ -1,6 +1,9 @@
+#include <__clang_cuda_builtin_vars.h>
 #include <stdio.h>
 #include <sys/time.h>
 #include <cuda.h>
+
+#define FULL_MASK 0xffffffff
 
 double get_walltime()
 {
@@ -12,53 +15,62 @@ const int BLOCK_DIM = 1024;
 __global__ void softmax(float *input, float *output, int M, int N)
 {
     int row = blockIdx.x;
-    __shared__ float tmp[BLOCK_DIM];
     __shared__ float globalMax;
     __shared__ float globalSum;
     //-----------
     float val = -__FLT_MAX__;
     // 循环计算每一列的最大值存在 val 中:
     // 实际是一个交错规约。
+    #pragma unroll
     for (int i = threadIdx.x; i < N; i += BLOCK_DIM)
     {
         val = max(val, input[row * N + i]);
     }
-    // val 中的值转移到 tmp 中
-    tmp[threadIdx.x] = val;
-    // 计算 tmp 中的最大值，存在 tmp[0] 中：
-    // 同样是交错规约。
-    for (int step = BLOCK_DIM / 2; step > 0; step /= 2)
+    #pragma unroll
+    for (int offset = 16; offset > 0; offset /= 2)
+        val = max(val, __shfl_down_sync(FULL_MASK, val, offset));
+    __shared__ float warp_shared[32];
+    if (threadIdx.x % 32 == 0)
     {
-        if (threadIdx.x < step)
-        {
-            tmp[threadIdx.x] = max(tmp[threadIdx.x], tmp[threadIdx.x + step]);
-        }
-        __syncthreads();
+        warp_shared[threadIdx.x / 32] = val;
     }
-    if (threadIdx.x == 0)
+    __syncthreads();
+    if (threadIdx.x < 32)
     {
-        globalMax = tmp[0];
+        val = warp_shared[threadIdx.x];
+        #pragma unroll
+        for (int offset = 16; offset > 0; offset /= 2)
+            val = max(val, __shfl_down_sync(FULL_MASK, val, offset));
+    }
+    if (threadIdx.x == 0) {
+        globalMax = val;
     }
     __syncthreads();
     //-----------
 
     val = 0.0f;
+    #pragma unroll
     for (int i = threadIdx.x; i < N; i += BLOCK_DIM)
     {
         val += __expf(input[row * N + i] - globalMax);
     }
-    tmp[threadIdx.x] = val;
-    for (int step = BLOCK_DIM / 2; step > 0; step /= 2)
+    #pragma unroll
+    for (int offset = 16; offset > 0; offset /= 2)
+        val += __shfl_down_sync(FULL_MASK, val, offset);
+    if (threadIdx.x % 32 == 0)
     {
-        if (threadIdx.x < step)
-        {
-            tmp[threadIdx.x] += tmp[threadIdx.x + step];
-        }
-        __syncthreads();
+        warp_shared[threadIdx.x / 32] = val;
     }
-    if (threadIdx.x == 0)
+    __syncthreads();
+    if (threadIdx.x < 32)
     {
-        globalSum = tmp[0];
+        val = warp_shared[threadIdx.x];
+        #pragma unroll
+        for (int offset = 16; offset > 0; offset /= 2)
+            val += __shfl_down_sync(FULL_MASK, val, offset);
+    }
+    if (threadIdx.x == 0) {
+        globalSum = val;
     }
     __syncthreads();
     for (int i = threadIdx.x; i < N; i += BLOCK_DIM)
