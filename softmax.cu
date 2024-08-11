@@ -17,11 +17,16 @@ __global__ void softmax(float *input, float *output, int M, int N)
     __shared__ float globalSum;
     //-----------
     float val = -__FLT_MAX__;
+    // 循环计算每一列的最大值存在 val 中:
+    // 实际是一个交错规约。
     for (int i = threadIdx.x; i < N; i += BLOCK_DIM)
     {
         val = max(val, input[row * N + i]);
     }
+    // val 中的值转移到 tmp 中
     tmp[threadIdx.x] = val;
+    // 计算 tmp 中的最大值，存在 tmp[0] 中：
+    // 同样是交错规约。
     for (int step = BLOCK_DIM / 2; step > 0; step /= 2)
     {
         if (threadIdx.x < step)
