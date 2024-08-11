@@ -2,7 +2,7 @@
 
 prama=($@)
 source=${prama[0]}
-source=${source:=he.cu}
+source=${source:=naive/he.cu}
 arr=(${source//./ /})
 
 clang++ $source -o ${arr[0]} -lcudart_static ${prama[@]:1} 2>/tmp/run_cuda_error.log
