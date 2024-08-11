@@ -13,7 +13,6 @@ const int BLOCK_DIM = 1024;
 __global__ void softmax(float *input, float *output, int M, int N)
 {
     int row = blockIdx.x;
-    __shared__ float tmp[BLOCK_DIM];
     __shared__ float globalMax;
     __shared__ float globalSum;
     //-----------
@@ -24,13 +23,11 @@ __global__ void softmax(float *input, float *output, int M, int N)
     {
         val = max(val, input[row * N + i]);
     }
-    // val 中的值转移到 tmp 中
-    tmp[threadIdx.x] = val;
     // 计算 tmp 中的最大值，存在 tmp[0] 中：
     // 同样是交错规约。
-    typedef cub::BlockReduce<float, BLOCK_DIM, cub::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY> BlockReduce;
+    typedef cub::BlockReduce<float, BLOCK_DIM> BlockReduce;
     __shared__ typename BlockReduce::TempStorage temp_storage;
-    float block_max = BlockReduce(temp_storage).Reduce(tmp[threadIdx.x], cub::Max());
+    float block_max = BlockReduce(temp_storage).Reduce(val, cub::Max());
     if (threadIdx.x == 0)
     {
         globalMax = block_max;
@@ -43,18 +40,10 @@ __global__ void softmax(float *input, float *output, int M, int N)
     {
         val += __expf(input[row * N + i] - globalMax);
     }
-    tmp[threadIdx.x] = val;
-    for (int step = BLOCK_DIM / 2; step > 0; step /= 2)
-    {
-        if (threadIdx.x < step)
-        {
-            tmp[threadIdx.x] += tmp[threadIdx.x + step];
-        }
-        __syncthreads();
-    }
+    float block_sum = BlockReduce(temp_storage).Sum(val);
     if (threadIdx.x == 0)
     {
-        globalSum = tmp[0];
+        globalSum = block_sum;
     }
     __syncthreads();
     for (int i = threadIdx.x; i < N; i += BLOCK_DIM)
