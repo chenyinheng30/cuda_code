@@ -19,6 +19,7 @@ __global__ void softmax(float *input, float *output, int M, int N)
     float val = -__FLT_MAX__;
     // 循环计算每一列的最大值存在 val 中:
     // 实际是一个交错规约。
+    #pragma unroll
     for (int i = threadIdx.x; i < N; i += BLOCK_DIM)
     {
         val = max(val, input[row * N + i]);
@@ -27,6 +28,7 @@ __global__ void softmax(float *input, float *output, int M, int N)
     tmp[threadIdx.x] = val;
     // 计算 tmp 中的最大值，存在 tmp[0] 中：
     // 同样是交错规约。
+    #pragma unroll
     for (int step = BLOCK_DIM / 2; step > 0; step /= 2)
     {
         if (threadIdx.x < step)
@@ -43,11 +45,13 @@ __global__ void softmax(float *input, float *output, int M, int N)
     //-----------
 
     val = 0.0f;
+    #pragma unroll
     for (int i = threadIdx.x; i < N; i += BLOCK_DIM)
     {
         val += __expf(input[row * N + i] - globalMax);
     }
     tmp[threadIdx.x] = val;
+    #pragma unroll
     for (int step = BLOCK_DIM / 2; step > 0; step /= 2)
     {
         if (threadIdx.x < step)
@@ -61,6 +65,7 @@ __global__ void softmax(float *input, float *output, int M, int N)
         globalSum = tmp[0];
     }
     __syncthreads();
+    #pragma unroll
     for (int i = threadIdx.x; i < N; i += BLOCK_DIM)
     {
         output[row * N + i] = __expf(input[row * N + i] - globalMax) * __fdividef(1.0F, globalSum);
