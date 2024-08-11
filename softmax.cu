@@ -28,7 +28,7 @@ __global__ void softmax(float *input, float *output, int M, int N)
     tmp[threadIdx.x] = val;
     // 计算 tmp 中的最大值，存在 tmp[0] 中：
     // 同样是交错规约。
-    typedef cub::BlockReduce<float, BLOCK_DIM, cub::BLOCK_REDUCE_WARP_REDUCTIONS> BlockReduce;
+    typedef cub::BlockReduce<float, BLOCK_DIM> BlockReduce;
     __shared__ typename BlockReduce::TempStorage temp_storage;
     float block_max = BlockReduce(temp_storage).Reduce(tmp[threadIdx.x], cub::Max());
     if (threadIdx.x == 0)
