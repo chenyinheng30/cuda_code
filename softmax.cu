@@ -1,3 +1,4 @@
+#include <cub/block/block_reduce.cuh>
 #include <stdio.h>
 #include <sys/time.h>
 #include <cuda.h>
@@ -27,17 +28,12 @@ __global__ void softmax(float *input, float *output, int M, int N)
     tmp[threadIdx.x] = val;
     // 计算 tmp 中的最大值，存在 tmp[0] 中：
     // 同样是交错规约。
-    for (int step = BLOCK_DIM / 2; step > 0; step /= 2)
-    {
-        if (threadIdx.x < step)
-        {
-            tmp[threadIdx.x] = max(tmp[threadIdx.x], tmp[threadIdx.x + step]);
-        }
-        __syncthreads();
-    }
+    typedef cub::BlockReduce<float, BLOCK_DIM, cub::BLOCK_REDUCE_WARP_REDUCTIONS> BlockReduce;
+    __shared__ typename BlockReduce::TempStorage temp_storage;
+    float block_max = BlockReduce(temp_storage).Reduce(tmp[threadIdx.x], cub::Max());
     if (threadIdx.x == 0)
     {
-        globalMax = tmp[0];
+        globalMax = block_max;
     }
     __syncthreads();
     //-----------
